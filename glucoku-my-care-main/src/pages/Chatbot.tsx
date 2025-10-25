@@ -15,7 +15,7 @@ const AZURE_API_KEY =
 
 // ===== Component Start =====
 export default function Chatbot() {
-  const { logs, chatMessages, addChatMessage, setChatMessages } = useAppStore();
+  const { logs, chatMessages, addChatMessage, setChatMessages, latestGlucose } = useAppStore();
   
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     // If there are stored chat messages, use them
@@ -34,8 +34,10 @@ export default function Chatbot() {
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  
+  // Use latestGlucose from Blynk if available, otherwise fall back to logs
   const latest = logs[0];
-  const currentGlucose = latest ? latest.glucose : 5.8;
+  const currentGlucose = latestGlucose !== null ? latestGlucose : (latest ? latest.glucose : 5.8);
 
   // Auto-scroll to bottom when new message arrives
   useEffect(() => {

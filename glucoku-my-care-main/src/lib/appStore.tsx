@@ -27,12 +27,14 @@ type AppStore = {
   logs: LogEntry[];
   settings: Settings;
   chatMessages: ChatMessage[];
+  latestGlucose: number | null;
   addLog: (entry: Omit<LogEntry, "id" | "timestamp">) => void;
   clearLogs: () => void;
   updateSettings: (patch: Partial<Settings>) => void;
   addChatMessage: (message: Omit<ChatMessage, "id">) => void;
   setChatMessages: (messages: ChatMessage[]) => void;
   clearChatMessages: () => void;
+  setLatestGlucose: (value: number | null) => void;
 };
 
 const LOCAL_KEY = "glucoku.app.v1";
@@ -46,6 +48,8 @@ const defaultSettings: Settings = {
 const AppContext = createContext<AppStore | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [latestGlucose, setLatestGlucose] = useState<number | null>(null);
+  
   const [logs, setLogs] = useState<LogEntry[]>(() => {
     try {
       const raw = localStorage.getItem(LOCAL_KEY);
@@ -120,15 +124,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     () => ({ 
       logs, 
       settings, 
-      chatMessages, 
+      chatMessages,
+      latestGlucose,
       addLog, 
       clearLogs, 
       updateSettings, 
       addChatMessage, 
       setChatMessages,
-      clearChatMessages 
+      clearChatMessages,
+      setLatestGlucose
     }), 
-    [logs, settings, chatMessages]
+    [logs, settings, chatMessages, latestGlucose]
   );
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

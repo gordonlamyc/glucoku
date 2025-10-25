@@ -3,13 +3,34 @@ import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useAppStore } from "@/lib/appStore";
+import { useEffect, useState } from "react";
+import axios from "axios";
+
+// Blynk configuration
+const BLYNK_AUTH_TOKEN = "Ly3IEOkc-SRWOzYOq-5jF1ArvMD62gLk";
+const BLYNK_API_URL = "https://blynk.cloud/external/api/get";
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { logs } = useAppStore();
+  const { logs, setLatestGlucose, latestGlucose } = useAppStore();
   const latest = logs[0];
-  const glucoseLevel = latest ? latest.glucose : 5.8;
-  const status = latest ? latest.status ?? "normal" : "normal";
+  
+  // State for Blynk data
+  const [blynkGlucose, setBlynkGlucose] = useState<number | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<string>("Loading...");
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  
+  // Use Blynk glucose if available, otherwise fallback to logs
+  const glucoseLevel = blynkGlucose !== null ? blynkGlucose : (latest ? latest.glucose : 5.8);
+  
+  // Determine status based on glucose level
+  const determineStatus = (level: number) => {
+    if (level > 7.8) return "high";
+    if (level < 3.9) return "low";
+    return "normal";
+  };
+  
+  const status = determineStatus(glucoseLevel);
 
   const getStatusColor = () => {
     if (status === "normal") return "bg-glucose-normal";
@@ -22,6 +43,68 @@ export default function Dashboard() {
     if (status === "high") return "High";
     return "Low";
   };
+
+  // Convert mg/dL to mmol/L
+  const convertToMmolL = (mgdl: number): number => {
+    // Standard conversion factor: 1 mmol/L = 18 mg/dL
+    return parseFloat((mgdl / 18).toFixed(1));
+  };
+
+  // Fetch data from Blynk
+  const fetchBlynkData = async () => {
+    try {
+      setIsLoading(true);
+      // Changed to fetch from V0 for glucose data
+      const url = `${BLYNK_API_URL}?token=${BLYNK_AUTH_TOKEN}&V0`;
+      console.log("Fetching glucose from Blynk URL:", url);
+      
+      const response = await axios.get(url);
+      console.log("Blynk raw response (glucose from V0):", response.data);
+      
+      // Get glucose value in mg/dL from Blynk
+      const glucoseValueMgdl = Number(response.data);
+      
+      if (!isNaN(glucoseValueMgdl)) {
+        // Convert from mg/dL to mmol/L
+        const glucoseValueMmol = convertToMmolL(glucoseValueMgdl);
+        console.log("Converted glucose value:", glucoseValueMgdl, "mg/dL →", glucoseValueMmol, "mmol/L");
+        
+        // Update local state
+        setBlynkGlucose(glucoseValueMmol);
+        setLastUpdated("Just now");
+        
+        // Store in app store for chatbot access
+        setLatestGlucose(glucoseValueMmol);
+        
+        // Update timestamp
+        const now = new Date();
+        setTimeout(() => {
+          setLastUpdated("1 min ago");
+        }, 60000);
+      } else {
+        console.warn("Invalid glucose value received from Blynk:", response.data);
+      }
+    } catch (error: any) {
+      console.error("Error fetching from Blynk:", error.message);
+      if (error.response) {
+        console.error("Error response:", error.response.data);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Fetch Blynk data on component mount and every 5 seconds
+  useEffect(() => {
+    // Initial fetch
+    fetchBlynkData();
+    
+    // Set up interval for periodic fetching
+    const intervalId = setInterval(fetchBlynkData, 5000);
+    
+    // Clean up interval on component unmount
+    return () => clearInterval(intervalId);
+  }, []);
 
   // today's summary
   const today = new Date().toDateString();
@@ -59,14 +142,27 @@ export default function Dashboard() {
             <div className="text-center space-y-4">
               <div className="flex items-center justify-center gap-2 mb-2">
                 <Activity className="h-5 w-5 text-primary" />
-                <span className="text-sm font-medium text-muted-foreground">Current Reading</span>
+                <span className="text-sm font-medium text-muted-foreground">
+                  {isLoading ? "Connecting to Device..." : "Current Reading"}
+                </span>
               </div>
               
               <div className="relative">
-                <div className="text-6xl font-bold text-foreground">
-                  {glucoseLevel}
+                <div className={`text-6xl font-bold text-foreground ${isLoading ? "opacity-70" : ""}`}>
+                  {isLoading ? (
+                    <span className="inline-block animate-pulse">...</span>
+                  ) : (
+                    glucoseLevel
+                  )}
                 </div>
                 <div className="text-muted-foreground mt-1">mmol/L</div>
+                {blynkGlucose !== null && (
+                  <div className="absolute -top-2 -right-2">
+                    <div className="bg-primary/20 text-primary text-xs px-2 py-1 rounded-full">
+                      Live
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center justify-center gap-2">
@@ -77,7 +173,9 @@ export default function Dashboard() {
               <div className="pt-4 border-t border-border">
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Last updated</span>
-                  <span className="font-medium">2 min ago</span>
+                  <span className="font-medium">
+                    {blynkGlucose !== null ? lastUpdated : "Not connected"}
+                  </span>
                 </div>
               </div>
             </div>
