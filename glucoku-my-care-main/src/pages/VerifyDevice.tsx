@@ -1,149 +1,153 @@
 import { useState, useRef, useEffect } from "react";
-import { ArrowLeft, Camera, QrCode, AlertCircle } from "lucide-react";
+import { Camera, X, Check, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { useNavigate } from "react-router-dom";
-import { useToast } from "@/components/ui/use-toast";
+import { useToast } from "@/hooks/use-toast";
+import jsQR from "jsqr";
 
-export default function VerifyDevice() {
-  const navigate = useNavigate();
-  const { toast } = useToast();
-  const [cameraActive, setCameraActive] = useState(false);
-  const [cameraError, setCameraError] = useState<string | null>(null);
-  const [scanning, setScanning] = useState(false);
+export default function DeviceVerification() {
+  const [verifying, setVerifying] = useState(false);
+  const [verified, setVerified] = useState(false);
+  const [qrResult, setQrResult] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
+  const [cameraActive, setCameraActive] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const { toast } = useToast();
+  const scanInterval = useRef<number | null>(null);
 
   // Initialize camera when component mounts
   useEffect(() => {
-    // Add a small delay to ensure the video element is rendered
-    const timer = setTimeout(() => {
-      startCamera();
-    }, 500);
-    
-    // Cleanup on unmount
-    return () => {
-      clearTimeout(timer);
-      stopCamera();
-    };
+    startCamera();
+    return () => stopCamera();
   }, []);
 
   const startCamera = async () => {
     try {
-      console.log("Starting camera...");
-      
-      // Check if mediaDevices is supported
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error("Camera API is not supported in this browser");
-      }
-      
-      // Stop any existing stream
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
-      
-      const constraints = {
-        video: { facingMode: "environment" }, // Use back camera if available
-        audio: false
-      };
-      
-      console.log("Requesting camera with constraints:", constraints);
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      streamRef.current = stream;
-      
-      console.log("Camera stream obtained:", stream);
-      
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" }, // back camera
+        audio: false,
+      });
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.onloadedmetadata = () => {
-          console.log("Video metadata loaded");
-          videoRef.current?.play()
-            .then(() => console.log("Video playback started"))
-            .catch(e => console.error("Error playing video:", e));
-        };
-        
         setCameraActive(true);
         setCameraError(null);
       }
+
+      // Start scanning loop
+      scanInterval.current = window.setInterval(scanQRCode, 500);
     } catch (err) {
       console.error("Error accessing camera:", err);
-      setCameraError(`Camera error: ${err instanceof Error ? err.message : String(err)}. Please check permissions and try again.`);
+      setCameraError("Could not access camera. Please check permissions.");
     }
   };
 
-  // Stop camera when component unmounts
   const stopCamera = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-    
-    if (videoRef.current) {
+    if (videoRef.current?.srcObject) {
+      const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
+      tracks.forEach((t) => t.stop());
       videoRef.current.srcObject = null;
     }
-    
     setCameraActive(false);
-    setScanning(false);
+
+    if (scanInterval.current) {
+      clearInterval(scanInterval.current);
+      scanInterval.current = null;
+    }
   };
 
-  const captureQR = () => {
-    // Start scanning process
-    setScanning(true);
-    
-    // Simulate QR code scanning with a timeout
-    setTimeout(() => {
-      // Simulate successful scan
-      toast({
-        title: "Device Verified",
-        description: "Your device has been successfully verified.",
-        variant: "default",
-        className: "bg-green-500 text-white border-green-600",
-      });
+  const scanQRCode = async () => {
+    if (!videoRef.current || !canvasRef.current) return;
+
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const context = canvas.getContext("2d");
+    if (!context || video.readyState !== video.HAVE_ENOUGH_DATA) return;
+
+    // Match canvas to video frame
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+
+    const code = jsQR(imageData.data, canvas.width, canvas.height);
+    if (code && code.data) {
+      console.log("QR Detected:", code.data);
       stopCamera();
-      navigate('/');
-    }, 3000); // Simulate scan after 3 seconds
+      setQrResult(code.data);
+      setVerified(true);
+      toast({
+        title: "QR Code Detected!",
+        description: "Redirecting to: " + code.data,
+      });
+
+      // Auto-redirect after short delay
+      setTimeout(() => {
+        if (code.data.startsWith("http")) {
+          window.location.href = code.data;
+        } else {
+          toast({
+            title: "Invalid QR Code",
+            description: "The QR code does not contain a valid URL.",
+            variant: "destructive",
+          });
+        }
+      }, 1500);
+    }
   };
 
-  const handleBack = () => {
-    stopCamera();
-    navigate(-1);
+  const handleReset = () => {
+    setVerified(false);
+    setQrResult(null);
+    startCamera();
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-background to-secondary/30 p-6 animate-fade-in">
       <div className="max-w-md mx-auto space-y-6">
-        <div className="flex items-center mb-6">
-          <Button variant="ghost" size="icon" onClick={handleBack} className="mr-2">
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
-          <div>
-            <h1 className="text-2xl font-bold">Verify Device</h1>
-            <p className="text-muted-foreground">Scan QR code to verify ownership</p>
-          </div>
+        <div className="text-center mb-6">
+          <h1 className="text-2xl font-bold mb-2">Device Verification</h1>
+          <p className="text-muted-foreground">Scan your device QR code to verify</p>
         </div>
 
-        <Card className="card-glow overflow-hidden border border-primary/30">
+        {/* Camera Preview */}
+        <Card className="card-glow overflow-hidden">
           <CardContent className="p-0">
             <div className="relative aspect-square bg-gradient-to-br from-muted to-secondary flex items-center justify-center">
-              {cameraError ? (
-                <div className="text-center space-y-4 p-8">
-                  <div className="inline-flex items-center justify-center h-20 w-20 rounded-full bg-warning/10">
-                    <AlertCircle className="h-10 w-10 text-warning" />
+              {!verified ? (
+                cameraError ? (
+                  <div className="text-center space-y-4 p-8">
+                    <div className="inline-flex items-center justify-center h-20 w-20 rounded-full bg-warning/10">
+                      <AlertCircle className="h-10 w-10 text-warning" />
+                    </div>
+                    <p className="text-sm text-muted-foreground">{cameraError}</p>
                   </div>
-                  <p className="text-sm text-muted-foreground">{cameraError}</p>
-                </div>
+                ) : (
+                  <div className="w-full h-full">
+                    <video
+                      ref={videoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      className="w-full h-full object-cover"
+                    />
+                    <p className="absolute bottom-4 left-0 right-0 text-center text-sm text-white bg-black/50 py-1">
+                      Position the QR code in the frame
+                    </p>
+                  </div>
+                )
               ) : (
-                <div className="w-full h-full">
-                  <video 
-                    ref={videoRef}
-                    autoPlay
-                    playsInline
-                    muted
-                    className="w-full h-full object-cover"
-                  />
-                  <p className="absolute bottom-4 left-0 right-0 text-center text-sm text-white bg-black/50 py-1">
-                    Position QR code within the frame to scan
+                <div className="w-full h-full relative flex flex-col items-center justify-center">
+                  <div className="flex items-center justify-center bg-success/10 rounded-full p-6 mb-3">
+                    <Check className="text-success h-10 w-10" />
+                  </div>
+                  <p className="text-sm text-muted-foreground text-center">
+                    QR Detected:
+                    <br />
+                    <span className="font-medium break-all text-success">
+                      {qrResult}
+                    </span>
                   </p>
                 </div>
               )}
@@ -151,23 +155,41 @@ export default function VerifyDevice() {
           </CardContent>
         </Card>
 
-        <Button
-          size="lg"
-          className="w-full bg-primary hover:bg-primary/90 h-14 text-lg"
-          onClick={captureQR}
-          disabled={scanning || !cameraActive}
-        >
-          <QrCode className="mr-2 h-5 w-5" />
-          {scanning ? "Scanning..." : "Capture QR"}
-        </Button>
+        <canvas ref={canvasRef} className="hidden" />
 
-        {cameraError && (
-          <Card className="card-glow bg-warning/10 border-warning/30">
+        {/* Buttons */}
+        <div className="flex gap-3">
+          <Button
+            variant="outline"
+            className="flex-1"
+            onClick={handleReset}
+            disabled={cameraActive && !verified}
+          >
+            <X className="mr-2 h-4 w-4" />
+            Retry
+          </Button>
+          {!verified && (
+            <Button
+              size="lg"
+              className="flex-1 bg-primary hover:bg-primary/90"
+              disabled={!cameraActive}
+            >
+              <Camera className="mr-2 h-4 w-4" />
+              Scanning...
+            </Button>
+          )}
+        </div>
+
+        {/* Tips */}
+        {!verified && !cameraError && (
+          <Card className="card-glow bg-secondary/50">
             <CardContent className="p-4">
-              <h4 className="font-semibold text-sm mb-2">⚠️ Camera Access Issue</h4>
-              <p className="text-xs text-muted-foreground">
-                {cameraError} Please check your browser settings and ensure camera permissions are granted.
-              </p>
+              <h4 className="font-semibold text-sm mb-2">📸 Tips for best results</h4>
+              <ul className="text-xs text-muted-foreground space-y-1">
+                <li>• Ensure good lighting</li>
+                <li>• Keep the QR code fully in view</li>
+                <li>• Hold the camera steady</li>
+              </ul>
             </CardContent>
           </Card>
         )}
