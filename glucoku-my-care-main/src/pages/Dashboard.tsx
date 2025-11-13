@@ -55,11 +55,11 @@ export default function Dashboard() {
     try {
       setIsLoading(true);
       // Changed to fetch from V0 for glucose data
-      const url = `${BLYNK_API_URL}?token=${BLYNK_AUTH_TOKEN}&V0`;
+      const url = `${BLYNK_API_URL}?token=${BLYNK_AUTH_TOKEN}&V1`;
       console.log("Fetching glucose from Blynk URL:", url);
       
       const response = await axios.get(url);
-      console.log("Blynk raw response (glucose from V0):", response.data);
+      console.log("Blynk raw response (glucose from V1):", response.data);
       
       // Get glucose value in mg/dL from Blynk
       const glucoseValueMgdl = Number(response.data);
